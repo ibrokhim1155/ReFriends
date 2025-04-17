@@ -10,23 +10,30 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 async def admin_panel(callback: types.CallbackQuery):
     await callback.message.edit_text("🔧 Admin paneliga xush kelibsiz", reply_markup=admin_menu())
 
+
 @dp.callback_query(F.data == "admin_payouts")
 async def view_payouts(callback: types.CallbackQuery):
     cursor.execute("SELECT id, user_id, amount FROM payouts WHERE approved = 0")
     payouts = cursor.fetchall()
+
     if not payouts:
         await callback.message.edit_text("✅ Hozircha tasdiqlanmagan so'rovlar yo'q", reply_markup=admin_menu())
         return
 
     for payout_id, user_id, amount in payouts:
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"approve_{payout_id}"),
+                InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin")
+            ]
+        ])
         await callback.message.answer(
             f"📄 <b>So'rov ID:</b> {payout_id}\n"
             f"<b>Foydalanuvchi ID:</b> {user_id}\n"
             f"<b>Miqdor:</b> {amount} so'm",
-            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
-                [types.InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"approve_{payout_id}")]
-            ])
+            reply_markup=markup
         )
+
 
 @dp.callback_query(F.data.startswith("approve_"))
 async def approve_payout(callback: types.CallbackQuery):
@@ -35,16 +42,21 @@ async def approve_payout(callback: types.CallbackQuery):
     conn.commit()
     await callback.message.answer("✅ To'lov so'rovi tasdiqlandi.")
 
+
 @dp.callback_query(F.data == "add_channel")
 async def add_channel_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("📢 Kanal <b>nomini</b> kiriting:")
     await state.set_state(ChannelState.title)
 
+
 @dp.message(ChannelState.title)
 async def set_channel_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
     await state.set_state(ChannelState.username)
-    await message.answer("📡 Kanal <b>username yoki link</b>ini kiriting (masalan: <code>mychannel</code> yoki <code>https://t.me/mychannel</code>):")
+    await message.answer(
+        "📡 Kanal <b>username yoki link</b>ini kiriting (masalan: <code>mychannel</code> yoki <code>https://t.me/mychannel</code>):"
+    )
+
 
 @dp.message(ChannelState.username)
 async def save_channel(message: types.Message, state: FSMContext):
@@ -62,6 +74,7 @@ async def save_channel(message: types.Message, state: FSMContext):
 
     await state.clear()
 
+
 @dp.callback_query(F.data == "admin_delete_channels")
 async def delete_channel_list(callback: types.CallbackQuery):
     cursor.execute("SELECT id, title, username FROM channels")
@@ -71,12 +84,17 @@ async def delete_channel_list(callback: types.CallbackQuery):
         return
 
     for chan_id, title, username in channels:
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🗑 O‘chirish", callback_data=f"delete_chan_{chan_id}"),
+                InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin")
+            ]
+        ])
         await callback.message.answer(
             f"📢 <b>{title}</b> - @{username}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🗑 O‘chirish", callback_data=f"delete_chan_{chan_id}")]
-            ])
+            reply_markup=markup
         )
+
 
 @dp.callback_query(F.data.startswith("delete_chan_"))
 async def delete_channel(callback: types.CallbackQuery):

@@ -5,7 +5,11 @@ import handlers
 import admin
 
 async def main():
-    init_db()
+    try:
+        init_db()
+    except Exception as error:
+        print(error)
+
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
