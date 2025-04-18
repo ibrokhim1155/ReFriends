@@ -1,0 +1,20 @@
+version: "3.7"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: referral-bot:latest
+    restart: unless-stopped
+    command: >
+      sh -c "python bot.py"
+    env_file:
+      - .env
+    cap_add:
+      - ALL
+    volumes:
+      - sqlite_data:/db_data/
+
+volumes:
+  sqlite_data:

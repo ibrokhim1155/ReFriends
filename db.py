@@ -1,7 +1,7 @@
 import sqlite3
 
 
-conn = sqlite3.connect("referral_bot.db")
+conn = sqlite3.connect("db_data/referral_bot.db")
 cursor = conn.cursor()
 
 def init_db():

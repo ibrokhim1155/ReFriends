@@ -4,6 +4,7 @@ from db import init_db
 import handlers
 import admin
 
+
 async def main():
     try:
         init_db()
@@ -12,5 +13,7 @@ async def main():
 
     await dp.start_polling(bot)
 
+
 if __name__ == "__main__":
+    print("Starting bot...")
     asyncio.run(main())
