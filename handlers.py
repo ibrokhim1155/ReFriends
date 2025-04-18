@@ -76,8 +76,17 @@ async def show_balance(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "withdraw")
 async def withdraw_start(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+    balance = cursor.fetchone()[0]
+
+    if balance < 5000:
+        await callback.message.edit_text("❗ Pul yechish uchun balansingiz kamida <b>5000 so‘m</b> bo‘lishi kerak.")
+        return
+
     await state.set_state(WithdrawState.full_name)
-    await callback.message.edit_text("Ism familiyangizni yuboring:")
+    await callback.message.edit_text("👤 Ism familiyangizni yuboring:")
+
 
 
 @dp.message(WithdrawState.full_name)
@@ -97,11 +106,18 @@ async def get_card_number(message: types.Message, state: FSMContext):
     cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
     balance = cursor.fetchone()[0]
 
+    await bot.send_message(
+        ADMIN_ID,
+        f"🧾 Pul yechish so‘rovi:\n👤 {full_name}\n💳 {card}\n💰 {balance} so'm"
+    )
+
+    cursor.execute(
+        "UPDATE users SET balance = 0, full_name = ?, card_number = ? WHERE user_id = ?",
+        (full_name, card, user_id)
+    )
     cursor.execute("INSERT INTO payouts (user_id, amount) VALUES (?, ?)", (user_id, balance))
-    cursor.execute("UPDATE users SET balance = 0, full_name = ?, card_number = ? WHERE user_id = ?", (full_name, card, user_id))
     conn.commit()
 
-    await bot.send_message(ADMIN_ID, f"🧾 Pul yechish so‘rovi:\n👤 {full_name}\n💳 {card}\n💰 {balance} so'm")
     await message.answer("✅ So‘rovingiz yuborildi. Tez orada ko‘rib chiqiladi.")
     await state.clear()
 
