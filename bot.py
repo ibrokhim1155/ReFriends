@@ -7,7 +7,6 @@ import admin
 
 async def main():
     init_db()
-    print("🤖 Bot ishga tushdi...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
