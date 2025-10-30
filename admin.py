@@ -1,14 +1,15 @@
 from aiogram import types, F
-from config import dp, conn, cursor
-from keyboards import admin_menu
-from states import ChannelState
 from aiogram.fsm.context import FSMContext
+from config import dp
+from db import conn, cursor
+from states import ChannelState
+from keyboards import admin_panel_menu
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 @dp.callback_query(F.data == "admin")
 async def admin_panel(callback: types.CallbackQuery):
-    await callback.message.edit_text("🔧 Admin paneliga xush kelibsiz", reply_markup=admin_menu())
+    await callback.message.edit_text("🔧 Admin paneliga xush kelibsiz", reply_markup=admin_panel_menu())
 
 
 @dp.callback_query(F.data == "admin_payouts")
@@ -17,7 +18,7 @@ async def view_payouts(callback: types.CallbackQuery):
     payouts = cursor.fetchall()
 
     if not payouts:
-        await callback.message.edit_text("✅ Hozircha tasdiqlanmagan so'rovlar yo'q", reply_markup=admin_menu())
+        await callback.message.edit_text("✅ Hozircha tasdiqlanmagan so'rovlar yo'q", reply_markup=admin_panel_menu())
         return
 
     for payout_id, user_id, amount in payouts:
@@ -53,9 +54,7 @@ async def add_channel_start(callback: types.CallbackQuery, state: FSMContext):
 async def set_channel_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
     await state.set_state(ChannelState.username)
-    await message.answer(
-        "📡 Kanal <b>username yoki link</b>ini kiriting (masalan: <code>mychannel</code> yoki <code>https://t.me/mychannel</code>):"
-    )
+    await message.answer("📡 Kanal username/linkini kiriting (masalan: @mychannel):")
 
 
 @dp.message(ChannelState.username)
@@ -80,7 +79,7 @@ async def delete_channel_list(callback: types.CallbackQuery):
     cursor.execute("SELECT id, title, username FROM channels")
     channels = cursor.fetchall()
     if not channels:
-        await callback.message.answer("❗ Kanallar mavjud emas.")
+        await callback.message.answer("❗ Kanallar mavjud emas.", reply_markup=admin_panel_menu())
         return
 
     for chan_id, title, username in channels:
@@ -90,10 +89,7 @@ async def delete_channel_list(callback: types.CallbackQuery):
                 InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin")
             ]
         ])
-        await callback.message.answer(
-            f"📢 <b>{title}</b> - @{username}",
-            reply_markup=markup
-        )
+        await callback.message.answer(f"📢 <b>{title}</b> - @{username}", reply_markup=markup)
 
 
 @dp.callback_query(F.data.startswith("delete_chan_"))

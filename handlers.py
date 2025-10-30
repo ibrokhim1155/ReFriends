@@ -1,132 +1,150 @@
 from aiogram import types, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, ChatMemberUpdatedFilter, MEMBER
 from aiogram.fsm.context import FSMContext
-from config import bot, dp, ADMIN_ID, HELP_USERNAME
+from config import dp, bot, ADMIN_ID
 from db import conn, cursor
-from states import WithdrawState
-from keyboards import main_menu, back_menu, admin_menu
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from referral import register_user_if_needed
-from middlewares import is_subscribed
+from states import GroupState
+from keyboards import main_menu, back_menu, admin_start_menu
+
+temp_referrals = {}
+
+
+def get_referral_count(user_id: int) -> int:
+    cursor.execute("SELECT referrals FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    return row[0] if row else 0
+
+
+def get_referral_stats():
+    cursor.execute("""
+        SELECT full_name, user_id, referrals
+        FROM users
+        WHERE user_id != ?
+        ORDER BY referrals DESC
+    """, (ADMIN_ID,))
+    return cursor.fetchall()
+
 
 @dp.message(CommandStart())
 async def start_handler(message: types.Message):
     user_id = message.from_user.id
-    payload = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+    full_name = message.from_user.full_name or "Noma’lum"
+    args = message.text.split(maxsplit=1)
+    payload = args[1] if len(args) > 1 else None
+
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (ADMIN_ID,))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users (user_id, full_name) VALUES (?, ?)", (ADMIN_ID, "Admin"))
+        conn.commit()
 
     if user_id == ADMIN_ID:
-        await message.answer("🔧 Admin paneliga xush kelibsiz!", reply_markup=admin_menu())
+        await message.answer(
+            "🔧 Admin paneliga xush kelibsiz!\nBu yerda siz referal guruh yoki kanal qo‘shishingiz mumkin.",
+            reply_markup=admin_start_menu()
+        )
         return
 
-    cursor.execute("SELECT title, username FROM channels")
-    channels = cursor.fetchall()
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    user = cursor.fetchone()
+    if not user:
+        referred_by = int(payload) if payload and payload.isdigit() and int(payload) != user_id else None
+        cursor.execute(
+            "INSERT INTO users (user_id, full_name, referred_by) VALUES (?, ?, ?)",
+            (user_id, full_name, referred_by)
+        )
+        conn.commit()
+        if referred_by:
+            temp_referrals[user_id] = referred_by
 
-    not_joined = []
-    for title, username in channels:
-        try:
-            check = await bot.get_chat_member(f"@{username}" if "t.me/" not in username else username, user_id)
-            if check.status not in ["member", "administrator", "creator"]:
-                not_joined.append((title, username))
-        except Exception:
-            not_joined.append((title, username))
+    cursor.execute("SELECT group_link FROM users WHERE user_id = ?", (ADMIN_ID,))
+    admin_group = cursor.fetchone()
+    group_link = admin_group[0] if admin_group and admin_group[0] else None
 
-    if not_joined:
-        text = "❗ Botdan foydalanish uchun quyidagi kanallarga a'zo bo‘ling:\n\n"
-        for title, username in not_joined:
-            link = f"https://t.me/{username.lstrip('@')}" if "t.me/" not in username else username
-            text += f"📢 <a href='{link}'>{title}</a>\n"
-        text += "\n✅ A'zo bo‘lganingizdan so‘ng, <b>Tekshirish</b> tugmasini bosing."
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Tekshirish", callback_data=f"checksub:{payload or ''}")]
-        ])
-        await message.answer(text, reply_markup=keyboard, disable_web_page_preview=True)
+    if not group_link:
+        await message.answer("Admin hali guruh linkini qo‘shmagan.")
         return
 
-    register_user_if_needed(user_id, payload)
-    await message.answer("🏠 Asosiy menyu:", reply_markup=main_menu())
+    await message.answer(
+        f"👋 Xush kelibsiz, {full_name}!\n\n"
+        f"📨 Sizning referal havolangiz:\n"
+        f"<code>https://t.me/{(await bot.get_me()).username}?start={user_id}</code>\n\n"
+        f"👥 Siz orqali kelganlar soni: {get_referral_count(user_id)} ta\n\n"
+        f"🔗 Guruhga kirish: {group_link}",
+        reply_markup=main_menu(user_id)
+    )
 
 
-@dp.callback_query(F.data.startswith("checksub"))
-async def check_subscription(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    payload = callback.data.split(":")[1] if ":" in callback.data else None
-
-    if await is_subscribed(user_id):
-        register_user_if_needed(user_id, payload)
-        await callback.message.edit_text("✅ A'zolik tasdiqlandi!\n🏠 Asosiy menyu:", reply_markup=main_menu())
-    else:
-        await callback.answer("❗ Hali barcha kanallarga a'zo emassiz.", show_alert=True)
+@dp.callback_query(F.data == "add_group")
+async def add_group_link(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("📎 Guruh linkini yuboring (masalan: https://t.me/mygroup):")
+    await state.set_state(GroupState.group_link)
 
 
-@dp.callback_query(F.data == "ref")
-async def referral_link(callback: types.CallbackQuery):
-    bot_user = await bot.get_me()
-    link = f"https://t.me/{bot_user.username}?start={callback.from_user.id}"
-    await callback.message.edit_text(f"📨 Sizning referal havolangiz:\n\n{link}", reply_markup=back_menu())
-
-
-@dp.callback_query(F.data == "balance")
-async def show_balance(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-    balance = cursor.fetchone()[0]
-    await callback.message.edit_text(f"💰 Sizning balansingiz: {balance} so'm", reply_markup=back_menu())
-
-
-@dp.callback_query(F.data == "withdraw")
-async def withdraw_start(callback: types.CallbackQuery, state: FSMContext):
-    user_id = callback.from_user.id
-    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-    balance = cursor.fetchone()[0]
-
-    if balance < 5000:
-        await callback.message.edit_text("❗ Pul yechish uchun balansingiz kamida <b>5000 so‘m</b> bo‘lishi kerak.")
-        return
-
-    await state.set_state(WithdrawState.full_name)
-    await callback.message.edit_text("👤 Ism familiyangizni yuboring:")
-
-
-
-@dp.message(WithdrawState.full_name)
-async def get_full_name(message: types.Message, state: FSMContext):
-    await state.update_data(full_name=message.text)
-    await state.set_state(WithdrawState.card_number)
-    await message.answer("💳 Plastik raqamingizni yuboring:")
-
-
-@dp.message(WithdrawState.card_number)
-async def get_card_number(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    full_name = data["full_name"]
-    card = message.text
+@dp.message(GroupState.group_link)
+async def save_group_link(message: types.Message, state: FSMContext):
+    link = message.text.strip()
     user_id = message.from_user.id
-
-    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-    balance = cursor.fetchone()[0]
-
-    await bot.send_message(
-        ADMIN_ID,
-        f"🧾 Pul yechish so‘rovi:\n👤 {full_name}\n💳 {card}\n💰 {balance} so'm"
-    )
-
-    cursor.execute(
-        "UPDATE users SET balance = 0, full_name = ?, card_number = ? WHERE user_id = ?",
-        (full_name, card, user_id)
-    )
-    cursor.execute("INSERT INTO payouts (user_id, amount) VALUES (?, ?)", (user_id, balance))
+    if user_id != ADMIN_ID:
+        await message.answer("❌ Sizda bu amalni bajarish uchun huquq yo‘q.")
+        await state.clear()
+        return
+    cursor.execute("UPDATE users SET group_link = ? WHERE user_id = ?", (link, ADMIN_ID))
     conn.commit()
-
-    await message.answer("✅ So‘rovingiz yuborildi. Tez orada ko‘rib chiqiladi.")
+    await message.answer(f"✅ Guruh link saqlandi:\n<code>{link}</code>", reply_markup=back_menu())
     await state.clear()
-
-
-@dp.callback_query(F.data == "help")
-async def help_menu(callback: types.CallbackQuery):
-    await callback.message.edit_text(f"🌐 Yordam uchun: @{HELP_USERNAME}", reply_markup=back_menu())
 
 
 @dp.callback_query(F.data == "back")
 async def back_to_main(callback: types.CallbackQuery):
-    await callback.message.edit_text("🏠 Asosiy menyu:", reply_markup=main_menu())
+    user_id = callback.from_user.id
+    if user_id == ADMIN_ID:
+        await callback.message.edit_text(
+            "🔧 Admin paneliga xush kelibsiz!\nBu yerda siz referal guruh yoki kanal qo‘shishingiz mumkin.",
+            reply_markup=admin_start_menu()
+        )
+        return
+
+    cursor.execute("SELECT group_link FROM users WHERE user_id = ?", (ADMIN_ID,))
+    admin_group = cursor.fetchone()
+    group_link = admin_group[0] if admin_group and admin_group[0] else None
+    if not group_link:
+        await callback.message.edit_text("Admin hali guruh linkini qo‘shmagan.", reply_markup=main_menu(user_id))
+        return
+
+    await callback.message.edit_text(
+        f"🏠 Asosiy menyu\n\n"
+        f"📨 Sizning referal havolangiz:\n"
+        f"<code>https://t.me/{(await bot.get_me()).username}?start={user_id}</code>\n\n"
+        f"👥 Siz orqali kelganlar soni: {get_referral_count(user_id)} ta\n\n"
+        f"🔗 Guruh: {group_link}",
+        reply_markup=main_menu(user_id)
+    )
+
+
+@dp.callback_query(F.data == "ref_stats")
+async def show_ref_stats(callback: types.CallbackQuery):
+    stats = get_referral_stats()
+    if not stats:
+        await callback.message.edit_text("📊 Hozircha foydalanuvchilar mavjud emas.", reply_markup=admin_start_menu())
+        return
+
+    text = "📊 <b>Referal statistika:</b>\n\n"
+    for row in stats:
+        name = row["full_name"] or "Noma’lum"
+        count = row["referrals"]
+        text += f"👤 <b>{name}</b> — {count} ta odam\n"
+    await callback.message.edit_text(text, reply_markup=admin_start_menu())
+
+
+@dp.chat_member(ChatMemberUpdatedFilter(member_status_changed=MEMBER))
+async def on_user_join(event: types.ChatMemberUpdated):
+    new_user = event.new_chat_member.user
+    new_user_id = new_user.id
+    if new_user_id in temp_referrals:
+        referrer_id = temp_referrals.pop(new_user_id)
+        cursor.execute("UPDATE users SET referrals = referrals + 1 WHERE user_id = ?", (referrer_id,))
+        conn.commit()
+        try:
+            await bot.send_message(referrer_id, f"🎉 Sizning referalingiz ({new_user.full_name}) guruhga qo‘shildi!")
+        except:
+            pass

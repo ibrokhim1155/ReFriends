@@ -1,8 +1,7 @@
 from aiogram.fsm.state import State, StatesGroup
 
-class WithdrawState(StatesGroup):
-    full_name = State()
-    card_number = State()
+class GroupState(StatesGroup):
+    group_link = State()
 
 class ChannelState(StatesGroup):
     title = State()
